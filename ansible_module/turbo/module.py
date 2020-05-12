@@ -15,7 +15,7 @@ class AnsibleTurboModule(AnsibleModule):
         super().__init__(**kwargs)
         self.module_name = module_name
         self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._socket_path = '/home/goneri/.ansible/vmware.socket'
+        self._socket_path = os.environ['HOME'] + '/.ansible/turbo_mode.socket'
         self._running = None
 
     def start_daemon(self):
@@ -24,7 +24,7 @@ class AnsibleTurboModule(AnsibleModule):
         if self._running:
             return
         q("Starting daemon")
-        p = subprocess.Popen([sys.executable, '-m', 'ansible_module.turbo.server', self._socket_path], close_fds=True)
+        p = subprocess.Popen([sys.executable, '-m', 'ansible_module.turbo.server', '--socket-path', self._socket_path], close_fds=True)
         self._running = True
         p.communicate()
         q("Daemon started!")

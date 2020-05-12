@@ -1,4 +1,5 @@
 from asyncio import coroutine, start_unix_server, Task
+import argparse
 import asyncio
 
 import aiohttp
@@ -71,6 +72,9 @@ class AnsibleVMwareTurboMode():
     def __init__(self):
         self.connector = aiohttp.TCPConnector(limit=20, ssl=False)
         self.sessions = collections.defaultdict(dict)
+        self.socket_path = None
+        self.ttl = None
+
 
     async def open_session(self, hostname, auth):
         if not self.sessions[hostname].get(auth):
@@ -86,7 +90,7 @@ class AnsibleVMwareTurboMode():
 
     async def ghost_killer(self):
         q("start watcher")
-        await asyncio.sleep(15)
+        await asyncio.sleep(self.ttl)
         q("DIE!!!")
         self.stop()
 
@@ -138,7 +142,6 @@ class AnsibleVMwareTurboMode():
         self.loop.add_signal_handler(signal.SIGTERM, self.stop)
         self._watcher = self.loop.create_task(self.ghost_killer())
 
-        self.socket_path = "/home/goneri/.ansible/vmware.socket"
 
         self.loop.create_task(start_unix_server(self.handle, path=self.socket_path, loop=self.loop))
         self.loop.run_forever()
@@ -149,6 +152,14 @@ class AnsibleVMwareTurboMode():
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Start a background daemon.')
+    parser.add_argument('--socket-path', default=os.environ['HOME'] + '/.ansible/turbo_mode.socket')
+    parser.add_argument('--ttl', default=15, type=int)
+
+    args = parser.parse_args()
+
     fork_process()
     server = AnsibleVMwareTurboMode()
+    server.socket_path = args.socket_path
+    server.ttl = args.ttl
     server.start()
