@@ -155,10 +155,19 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Start a background daemon.')
     parser.add_argument('--socket-path', default=os.environ['HOME'] + '/.ansible/turbo_mode.socket')
     parser.add_argument('--ttl', default=15, type=int)
+    parser.add_argument('--extra-sys-path', action='append')
+    parser.add_argument('--fork', action='store_true')
+
 
     args = parser.parse_args()
-
-    fork_process()
+    import q
+    q(args)
+    if args.fork:
+        fork_process()
+    if args.extra_sys_path:
+        for sys_path in args.extra_sys_path:
+            q(sys_path)
+            sys.path.append(sys_path)
     server = AnsibleVMwareTurboMode()
     server.socket_path = args.socket_path
     server.ttl = args.ttl

@@ -24,7 +24,7 @@ class AnsibleTurboModule(AnsibleModule):
         if self._running:
             return
         q("Starting daemon")
-        p = subprocess.Popen([sys.executable, '-m', 'ansible_module.turbo.server', '--socket-path', self._socket_path], close_fds=True)
+        p = subprocess.Popen([sys.executable, '-m', 'ansible_module.turbo.server', '--fork', '--socket-path', self._socket_path, '--extra-sys-path', sys.path[0]], close_fds=True)
         self._running = True
         p.communicate()
         q("Daemon started!")
