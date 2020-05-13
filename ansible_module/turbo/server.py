@@ -21,15 +21,17 @@ from asyncio import get_event_loop
 
 import openstack
 import q
+
 cloud = openstack.connect()
 
 sys_path_lock = asyncio.Lock()
 
+
 def fork_process():
-    '''
+    """
     This function performs the double fork process to detach from the
     parent process and execute.
-    '''
+    """
     pid = os.fork()
 
     if pid == 0:
@@ -69,21 +71,19 @@ def fork_process():
 
 
 class EmbeddedModuleFailure(Exception):
-
     def __init__(self, message):
         self._message = message
 
     def get_message(self):
         return repr(self._message)
 
-class EmbeddedModuleSuccess(Exception):
 
+class EmbeddedModuleSuccess(Exception):
     def __init__(self, **kwargs):
         self.kwargs = kwargs
 
 
-class EmbeddedModule():
-
+class EmbeddedModule:
     def __init__(self, module_name, collection_name, ansiblez_path, check_mode, params):
         self.module_name = module_name
         self.collection_name = collection_name
@@ -91,9 +91,9 @@ class EmbeddedModule():
         self.check_mode = check_mode
         self.params = params
         self.module_class = None
-        self.module_path = 'ansible_collections.{collection_name}.plugins.modules.{module_name}'.format(
-            collection_name=collection_name,
-            module_name=module_name)
+        self.module_path = "ansible_collections.{collection_name}.plugins.modules.{module_name}".format(
+            collection_name=collection_name, module_name=module_name
+        )
         self._signature_hash_cache = None
         self._initialized_env = None
 
@@ -105,11 +105,15 @@ class EmbeddedModule():
 
     async def unload(self):
         async with sys_path_lock:
-            sys.path = [i for i in sys.path if i != ansiblez_path]
+            sys.path = [i for i in sys.path if i != self.ansiblez_path]
 
     def signature_hash(self):
         if not self._signature_hash_cache:
-            data = {k: v for k, v in self.params.items() if k in self.module_class.initialize_params}
+            data = {
+                k: v
+                for k, v in self.params.items()
+                if k in self.module_class.initialize_params
+            }
             json_data = json.dumps(data, sort_keys=True)
             self._signature_hash_cache = hash(json_data)
         return self._signature_hash_cache
@@ -121,9 +125,13 @@ class EmbeddedModule():
         if not self.signature_hash() in sessions[self.module_path]:
             try:
                 if inspect.iscoroutinefunction(self.module_class.initialize):
-                    sessions[self.module_path][self.signature_hash()] = await self.module_class.initialize(self)
+                    sessions[self.module_path][
+                        self.signature_hash()
+                    ] = await self.module_class.initialize(self)
                 else:
-                    sessions[self.module_path][self.signature_hash()] = self.module_class.initialize(self)
+                    sessions[self.module_path][
+                        self.signature_hash()
+                    ] = self.module_class.initialize(self)
             except Exception as e:
                 raise EmbeddedModuleFailure(e)
         self._initialized_env = sessions[self.module_path][self.signature_hash()]
@@ -148,33 +156,38 @@ class EmbeddedModule():
         raise EmbeddedModuleSuccess(**kwargs)
 
 
-class AnsibleVMwareTurboMode():
-
+class AnsibleVMwareTurboMode:
     def __init__(self):
         self.connector = aiohttp.TCPConnector(limit=20, ssl=False)
         self.sessions = collections.defaultdict(dict)
         self.socket_path = None
         self.ttl = None
 
-
     async def ghost_killer(self):
         await asyncio.sleep(self.ttl)
         self.stop()
-
 
     async def handle(self, reader, writer):
         self._watcher.cancel()
         self._watcher = self.loop.create_task(self.ghost_killer())
 
-        raw_data = await reader.read(1024*10)
+        raw_data = await reader.read(1024 * 10)
         if not raw_data:
             return
         try:
-            module_name, collection_name, ansiblez_path, check_mode, params = json.loads(raw_data)
+            (
+                module_name,
+                collection_name,
+                ansiblez_path,
+                check_mode,
+                params,
+            ) = json.loads(raw_data)
         except json.decoder.JSONDecodeError as e:
             return
 
-        embedded_module = EmbeddedModule(module_name, collection_name, ansiblez_path, check_mode, params)
+        embedded_module = EmbeddedModule(
+            module_name, collection_name, ansiblez_path, check_mode, params
+        )
 
         await embedded_module.load()
         try:
@@ -185,21 +198,23 @@ class AnsibleVMwareTurboMode():
         except EmbeddedModuleFailure as e:
             result = {"msg": e.get_message(), "failed": True}
         except Exception:
-            result = {"msg": format_stack(), "failed": True}
+            import traceback
+
+            result = {"msg": traceback.format_stack(), "failed": True}
 
         writer.write(json.dumps(result).encode())
         writer.close()
 
         embedded_module.unload()
 
-
     def start(self):
         self.loop = get_event_loop()
         self.loop.add_signal_handler(signal.SIGTERM, self.stop)
         self._watcher = self.loop.create_task(self.ghost_killer())
 
-
-        self.loop.create_task(start_unix_server(self.handle, path=self.socket_path, loop=self.loop))
+        self.loop.create_task(
+            start_unix_server(self.handle, path=self.socket_path, loop=self.loop)
+        )
         self.loop.run_forever()
 
     def stop(self):
@@ -207,12 +222,13 @@ class AnsibleVMwareTurboMode():
         self.loop.stop()
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Start a background daemon.')
-    parser.add_argument('--socket-path', default=os.environ['HOME'] + '/.ansible/turbo_mode.socket')
-    parser.add_argument('--ttl', default=5, type=int)
-    parser.add_argument('--fork', action='store_true')
-
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Start a background daemon.")
+    parser.add_argument(
+        "--socket-path", default=os.environ["HOME"] + "/.ansible/turbo_mode.socket"
+    )
+    parser.add_argument("--ttl", default=5, type=int)
+    parser.add_argument("--fork", action="store_true")
 
     args = parser.parse_args()
     if args.fork:
