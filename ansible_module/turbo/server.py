@@ -204,7 +204,7 @@ class AnsibleVMwareTurboMode:
         writer.write(json.dumps(result).encode())
         writer.close()
 
-        embedded_module.unload()
+        await embedded_module.unload()
 
     def start(self):
         self.loop = get_event_loop()
