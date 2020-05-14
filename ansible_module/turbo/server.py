@@ -226,7 +226,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--socket-path", default=os.environ["HOME"] + "/.ansible/turbo_mode.socket"
     )
-    parser.add_argument("--ttl", default=5, type=int)
+    parser.add_argument("--ttl", default=15, type=int)
     parser.add_argument("--fork", action="store_true")
 
     args = parser.parse_args()
