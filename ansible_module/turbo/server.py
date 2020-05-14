@@ -100,8 +100,10 @@ class EmbeddedModule:
     async def load(self):
         async with sys_path_lock:
             sys.path.insert(0, self.ansiblez_path)
-        self.module_class = importlib.import_module(self.module_path)
-        self.initialize_params = self.module_class.initialize_params
+            self.module_class = importlib.import_module(self.module_path)
+            if not hasattr(self.module_class, "initialize"):
+                raise EmbeddedModuleFailure("No initialize function found!")
+            self.initialize_params = self.module_class.initialize_params
 
     async def unload(self):
         async with sys_path_lock:
@@ -119,22 +121,19 @@ class EmbeddedModule:
         return self._signature_hash_cache
 
     async def initialize(self, sessions):
-        if not hasattr(self.module_class, "initialize"):
-            raise EmbeddedModuleFailure("No initialize function found!")
-
-        if not self.signature_hash() in sessions[self.module_path]:
+        if not self.signature_hash() in sessions[self.collection_name]:
             try:
                 if inspect.iscoroutinefunction(self.module_class.initialize):
-                    sessions[self.module_path][
+                    sessions[self.collection_name][
                         self.signature_hash()
                     ] = await self.module_class.initialize(self)
                 else:
-                    sessions[self.module_path][
+                    sessions[self.collection_name][
                         self.signature_hash()
                     ] = self.module_class.initialize(self)
             except Exception as e:
                 raise EmbeddedModuleFailure(e)
-        self._initialized_env = sessions[self.module_path][self.signature_hash()]
+        self._initialized_env = sessions[self.collection_name][self.signature_hash()]
 
     async def run(self):
         if not hasattr(self.module_class, "entry_point"):
