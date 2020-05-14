@@ -196,10 +196,10 @@ class AnsibleVMwareTurboMode:
             result = e.kwargs
         except EmbeddedModuleFailure as e:
             result = {"msg": e.get_message(), "failed": True}
-        except Exception:
+        except Exception as e:
             import traceback
 
-            result = {"msg": traceback.format_stack(), "failed": True}
+            result = {"msg": traceback.format_stack() + [str(e)], "failed": True}
 
         writer.write(json.dumps(result).encode())
         writer.close()
