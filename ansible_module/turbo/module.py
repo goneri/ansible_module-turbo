@@ -19,7 +19,6 @@ class AnsibleTurboModule(AnsibleModule):
 
     def start_daemon(self):
         import subprocess
-        import sys
 
         if self._running:
             return

@@ -3,6 +3,7 @@ import argparse
 import asyncio
 
 import aiohttp
+import traceback
 
 
 import json
@@ -19,10 +20,10 @@ import signal
 
 from asyncio import get_event_loop
 
-import openstack
 import q
 
-cloud = openstack.connect()
+from ansible_module.turbo.exceptions import EmbeddedModuleFailure
+from ansible_module.turbo.exceptions import EmbeddedModuleSuccess
 
 sys_path_lock = asyncio.Lock()
 
@@ -70,19 +71,6 @@ def fork_process():
     return pid
 
 
-class EmbeddedModuleFailure(Exception):
-    def __init__(self, message):
-        self._message = message
-
-    def get_message(self):
-        return repr(self._message)
-
-
-class EmbeddedModuleSuccess(Exception):
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
-
-
 class EmbeddedModule:
     def __init__(self, module_name, collection_name, ansiblez_path, check_mode, params):
         self.module_name = module_name
@@ -90,47 +78,65 @@ class EmbeddedModule:
         self.ansiblez_path = ansiblez_path
         self.check_mode = check_mode
         self.params = params
+        self.init_class = None
         self.module_class = None
         self.module_path = "ansible_collections.{collection_name}.plugins.modules.{module_name}".format(
             collection_name=collection_name, module_name=module_name
+        )
+        self.init_path = "ansible_collections.{collection_name}.plugins.module_utils.init".format(
+            collection_name=collection_name
         )
         self._signature_hash_cache = None
         self._initialized_env = None
 
     async def load(self):
+        import sys
+        import importlib
         async with sys_path_lock:
             sys.path.insert(0, self.ansiblez_path)
             self.module_class = importlib.import_module(self.module_path)
-            if not hasattr(self.module_class, "initialize"):
+            self.init_class = importlib.import_module(self.init_path)
+            if not hasattr(self.init_class, "initialize"):
                 raise EmbeddedModuleFailure("No initialize function found!")
-            self.initialize_params = self.module_class.initialize_params
+        self.initialize_params = self.init_class.initialize_params
 
     async def unload(self):
         async with sys_path_lock:
             sys.path = [i for i in sys.path if i != self.ansiblez_path]
+            for path, module in tuple(sys.modules.items()):
+                if not path or not module:
+                    continue
+                if path.startswith('ansible_collections'):
+                    del(sys.modules[path])
+            importlib.invalidate_caches()
+            sys.path_importer_cache.clear()
+
+    def init_params(self):
+        return {
+                k: v
+                for k, v in self.params.items()
+                if k in self.init_class.initialize_params
+            }
 
     def signature_hash(self):
         if not self._signature_hash_cache:
-            data = {
-                k: v
-                for k, v in self.params.items()
-                if k in self.module_class.initialize_params
-            }
-            json_data = json.dumps(data, sort_keys=True)
+            json_data = json.dumps(self.init_params(), sort_keys=True)
             self._signature_hash_cache = hash(json_data)
         return self._signature_hash_cache
 
     async def initialize(self, sessions):
         if not self.signature_hash() in sessions[self.collection_name]:
             try:
-                if inspect.iscoroutinefunction(self.module_class.initialize):
+                if inspect.iscoroutinefunction(self.init_class.initialize):
                     sessions[self.collection_name][
                         self.signature_hash()
-                    ] = await self.module_class.initialize(self)
+                    ] = await self.init_class.initialize(**self.init_params())
                 else:
                     sessions[self.collection_name][
                         self.signature_hash()
-                    ] = self.module_class.initialize(self)
+                    ] = self.init_class.initialize(**self.init_params())
+            except EmbeddedModuleFailure as e:
+                raise e
             except Exception as e:
                 raise EmbeddedModuleFailure(e)
         self._initialized_env = sessions[self.collection_name][self.signature_hash()]
@@ -140,7 +146,7 @@ class EmbeddedModule:
             raise EmbeddedModuleFailure("No entry_point found!")
         try:
             if inspect.iscoroutinefunction(self.module_class.entry_point):
-                result = self.module_class.entry_point(self, **self._initialized_env)
+                result = await self.module_class.entry_point(self, **self._initialized_env)
             else:
                 result = self.module_class.entry_point(self, **self._initialized_env)
         except EmbeddedModuleSuccess:
@@ -157,7 +163,6 @@ class EmbeddedModule:
 
 class AnsibleVMwareTurboMode:
     def __init__(self):
-        self.connector = aiohttp.TCPConnector(limit=20, ssl=False)
         self.sessions = collections.defaultdict(dict)
         self.socket_path = None
         self.ttl = None
@@ -197,8 +202,6 @@ class AnsibleVMwareTurboMode:
         except EmbeddedModuleFailure as e:
             result = {"msg": e.get_message(), "failed": True}
         except Exception as e:
-            import traceback
-
             result = {"msg": traceback.format_stack() + [str(e)], "failed": True}
 
         writer.write(json.dumps(result).encode())
