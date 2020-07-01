@@ -94,17 +94,8 @@ with OpenStack's `os_keypair` module that I've slightly simplified.
                 **module_kwargs)
         module.run()
 
-    initialize_params = ["cloud", "interface", "auth", "auth_type", "region_name", "validate_certs", "ca_certs", "client_key", "api_timeout"]
-
-
-    def initialize(module):
-        from ansible_collections.openstack.cloud.plugins.module_utils.openstack import openstack_cloud_from_module
-        sdk, cloud = openstack_cloud_from_module(module)
-        return {"sdk": sdk, "cloud": cloud}
-
 
     def entry_point(module, sdk, cloud):
-
         state = module.params['state']
         name = module.params['name']
         public_key = module.params['public_key']
@@ -113,8 +104,12 @@ with OpenStack's `os_keypair` module that I've slightly simplified.
             with open(module.params['public_key_file']) as public_key_fh:
                 public_key = public_key_fh.read().rstrip()
 
+
         try:
             keypair = cloud.get_keypair(name)
+
+            if module.check_mode:
+                module.exit_json(changed=_system_state_change(module, keypair))
 
             if state in ('present', 'replace'):
                 if keypair and keypair['name'] == name:
@@ -135,8 +130,8 @@ with OpenStack's `os_keypair` module that I've slightly simplified.
                     changed = True
 
                 module.exit_json(changed=changed,
-                                key=keypair,
-                                id=keypair['id'])
+                                 key=keypair,
+                                 id=keypair['id'])
 
             elif state == 'absent':
                 if keypair:
@@ -162,7 +157,7 @@ In this example, the two main differences are:
 You can also use Github to `compare the two versions`_ of the
 Ansible module.
 
-.. _compare the two versions: https://github.com/openstack/ansible-collections-openstack/compare/master...goneri:turbo_mode
+.. _compare the two versions: https://github.com/goneri/ansible-collections-openstack/compare/turbo_mode_3_pre...goneri:turbo_mode_3?expand=1#diff-69ce5d194bb2d85237491c41946b2805
 
 Demo
 ====
