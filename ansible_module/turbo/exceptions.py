@@ -9,4 +9,3 @@ class EmbeddedModuleFailure(Exception):
 class EmbeddedModuleSuccess(Exception):
     def __init__(self, **kwargs):
         self.kwargs = kwargs
-

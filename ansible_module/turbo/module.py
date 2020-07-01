@@ -1,8 +1,7 @@
-import socket
-import os
-import sys
-
 import json
+import os
+import socket
+import sys
 import time
 
 from ansible.module_utils.basic import AnsibleModule

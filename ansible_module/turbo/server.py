@@ -1,26 +1,14 @@
-from asyncio import coroutine, start_unix_server, Task
 import argparse
 import asyncio
-
-import aiohttp
-import traceback
-
-
+import importlib
+import inspect
 import json
 import collections
-
 import os
 import signal
 import sys
-import inspect
+import traceback
 
-import importlib
-
-import signal
-
-from asyncio import get_event_loop
-
-import q
 
 from ansible_module.turbo.exceptions import EmbeddedModuleFailure
 from ansible_module.turbo.exceptions import EmbeddedModuleSuccess
@@ -91,7 +79,7 @@ class EmbeddedModule:
 
     async def load(self):
         import sys
-        import importlib
+
         async with sys_path_lock:
             sys.path.insert(0, self.ansiblez_path)
             self.module_class = importlib.import_module(self.module_path)
@@ -106,17 +94,17 @@ class EmbeddedModule:
             for path, module in tuple(sys.modules.items()):
                 if not path or not module:
                     continue
-                if path.startswith('ansible_collections'):
-                    del(sys.modules[path])
+                if path.startswith("ansible_collections"):
+                    del sys.modules[path]
             importlib.invalidate_caches()
             sys.path_importer_cache.clear()
 
     def init_params(self):
         return {
-                k: v
-                for k, v in self.params.items()
-                if k in self.init_class.initialize_params
-            }
+            k: v
+            for k, v in self.params.items()
+            if k in self.init_class.initialize_params
+        }
 
     def signature_hash(self):
         if not self._signature_hash_cache:
@@ -146,7 +134,9 @@ class EmbeddedModule:
             raise EmbeddedModuleFailure("No entry_point found!")
         try:
             if inspect.iscoroutinefunction(self.module_class.entry_point):
-                result = await self.module_class.entry_point(self, **self._initialized_env)
+                result = await self.module_class.entry_point(
+                    self, **self._initialized_env
+                )
             else:
                 result = self.module_class.entry_point(self, **self._initialized_env)
         except EmbeddedModuleSuccess:
@@ -200,7 +190,8 @@ class AnsibleVMwareTurboMode:
         except EmbeddedModuleSuccess as e:
             result = e.kwargs
         except EmbeddedModuleFailure as e:
-            result = {"msg": e.get_message(), "failed": True}
+            # result = {"msg": e.get_message(), "failed": True}
+            result = {"msg": traceback.format_stack() + [str(e)], "failed": True}
         except Exception as e:
             result = {"msg": traceback.format_stack() + [str(e)], "failed": True}
 
@@ -210,12 +201,14 @@ class AnsibleVMwareTurboMode:
         await embedded_module.unload()
 
     def start(self):
-        self.loop = get_event_loop()
+        self.loop = asyncio.get_event_loop()
         self.loop.add_signal_handler(signal.SIGTERM, self.stop)
         self._watcher = self.loop.create_task(self.ghost_killer())
 
         self.loop.create_task(
-            start_unix_server(self.handle, path=self.socket_path, loop=self.loop)
+            asyncio.start_unix_server(
+                self.handle, path=self.socket_path, loop=self.loop
+            )
         )
         self.loop.run_forever()
 
