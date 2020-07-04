@@ -4,17 +4,17 @@ import socket
 import sys
 import time
 
-from ansible.module_utils.basic import AnsibleModule
+import ansible.module_utils.basic
+from ansible_module.turbo.exceptions import EmbeddedModuleSuccess
 
 
-class AnsibleTurboModule(AnsibleModule):
-    def __init__(self, module_name, collection_name, **kwargs):
-        super().__init__(**kwargs)
-        self.module_name = module_name
-        self.collection_name = collection_name
-        self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+class AnsibleTurboModule(ansible.module_utils.basic.AnsibleModule):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._socket = None
         self._socket_path = os.environ["HOME"] + "/.ansible/turbo_mode.socket"
         self._running = None
+        self.run_on_daemon()
 
     def start_daemon(self):
         import subprocess
@@ -37,6 +37,7 @@ class AnsibleTurboModule(AnsibleModule):
         return
 
     def connect(self):
+        self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         for attempt in range(100, -1, -1):
             try:
                 self._socket.connect(self._socket_path)
@@ -47,19 +48,26 @@ class AnsibleTurboModule(AnsibleModule):
                     raise
             time.sleep(0.01)
 
-    def run(self):
+    def run_on_daemon(self):
+        if sys.argv[0].endswith("/server.py"):
+            return
         self.connect()
         result = dict(changed=False, original_message="", message="")
         ansiblez_path = sys.path[0]
         data = [
-            self.module_name,
-            self.collection_name,
             ansiblez_path,
-            self.check_mode,
-            self.params,
+            ansible.module_utils.basic._ANSIBLE_ARGS.decode(),
         ]
         self._socket.send(json.dumps(data).encode())
-        raw = self._socket.recv((1024 * 10)).decode()
+        b = self._socket.recv((1024 * 10))
+        raw = b.decode()
         self._socket.close()
         result = json.loads(raw)
         self.exit_json(**result)
+
+    def exit_json(self, **kwargs):
+        if not sys.argv[0].endswith("/server.py"):
+            super().exit_json(**kwargs)
+        else:
+            self.do_cleanup_files()
+            raise EmbeddedModuleSuccess(**kwargs)

@@ -2,18 +2,22 @@ import argparse
 import asyncio
 import importlib
 import inspect
+import io
 import json
 import collections
 import os
 import signal
 import sys
 import traceback
+import zipfile
 
 
 from ansible_module.turbo.exceptions import EmbeddedModuleFailure
 from ansible_module.turbo.exceptions import EmbeddedModuleSuccess
 
 sys_path_lock = asyncio.Lock()
+
+import ansible.module_utils.basic
 
 
 def fork_process():
@@ -24,7 +28,6 @@ def fork_process():
     pid = os.fork()
 
     if pid == 0:
-        # Set stdin/stdout/stderr to /dev/null
         fd = os.open(os.devnull, os.O_RDWR)
 
         # clone stdin/out/err
@@ -32,14 +35,10 @@ def fork_process():
             if fd != num:
                 os.dup2(fd, num)
 
-        # close otherwise
         if fd not in range(3):
             os.close(fd)
 
-        # Make us a daemon
         pid = os.fork()
-
-        # end if not in child
         if pid > 0:
             os._exit(0)
 
@@ -60,95 +59,76 @@ def fork_process():
 
 
 class EmbeddedModule:
-    def __init__(self, module_name, collection_name, ansiblez_path, check_mode, params):
-        self.module_name = module_name
-        self.collection_name = collection_name
+    def __init__(self, ansiblez_path, params):
         self.ansiblez_path = ansiblez_path
-        self.check_mode = check_mode
+        self.collection_name, self.module_name = self.find_module_name()
         self.params = params
-        self.init_class = None
         self.module_class = None
         self.module_path = "ansible_collections.{collection_name}.plugins.modules.{module_name}".format(
-            collection_name=collection_name, module_name=module_name
+            collection_name=self.collection_name, module_name=self.module_name
         )
-        self.init_path = "ansible_collections.{collection_name}.plugins.module_utils.init".format(
-            collection_name=collection_name
-        )
-        self._signature_hash_cache = None
-        self._initialized_env = None
+
+
+    def find_module_name(self):
+        with zipfile.ZipFile(self.ansiblez_path) as zip:
+            for path in zip.namelist():
+                if not path.startswith('ansible_collections'):
+                    continue
+                if not path.endswith('.py'):
+                    continue
+                if path.endswith('__init__.py'):
+                    continue
+                splitted = path.split('/')
+                if len(splitted) != 6:
+                    continue
+                if splitted[-3:-1] != ['plugins', 'modules']:
+                    continue
+                collection = ".".join(splitted[1:3])
+                name = splitted[-1][:-3]
+                return collection, name
 
     async def load(self):
-        import sys
-
         async with sys_path_lock:
             sys.path.insert(0, self.ansiblez_path)
             self.module_class = importlib.import_module(self.module_path)
-            self.init_class = importlib.import_module(self.init_path)
-            if not hasattr(self.init_class, "initialize"):
-                raise EmbeddedModuleFailure("No initialize function found!")
-        self.initialize_params = self.init_class.initialize_params
 
     async def unload(self):
         async with sys_path_lock:
             sys.path = [i for i in sys.path if i != self.ansiblez_path]
             for path, module in tuple(sys.modules.items()):
-                if not path or not module:
-                    continue
-                if path.startswith("ansible_collections"):
-                    del sys.modules[path]
+                if path and module and path.startswith("ansible_collections"):
+                    splitted = path.split('.')
+                    # NOTE: Do we really need to remove the module?
+                    if len(splitted) == 6 and splitted[-2] == "plugins":
+                        del sys.modules[path]
             importlib.invalidate_caches()
             sys.path_importer_cache.clear()
 
-    def init_params(self):
-        return {
-            k: v
-            for k, v in self.params.items()
-            if k in self.init_class.initialize_params
-        }
-
-    def signature_hash(self):
-        if not self._signature_hash_cache:
-            json_data = json.dumps(self.init_params(), sort_keys=True)
-            self._signature_hash_cache = hash(json_data)
-        return self._signature_hash_cache
-
-    async def initialize(self, sessions):
-        if not self.signature_hash() in sessions[self.collection_name]:
-            try:
-                if inspect.iscoroutinefunction(self.init_class.initialize):
-                    sessions[self.collection_name][
-                        self.signature_hash()
-                    ] = await self.init_class.initialize(**self.init_params())
-                else:
-                    sessions[self.collection_name][
-                        self.signature_hash()
-                    ] = self.init_class.initialize(**self.init_params())
-            except EmbeddedModuleFailure as e:
-                raise e
-            except Exception as e:
-                raise EmbeddedModuleFailure(e)
-        self._initialized_env = sessions[self.collection_name][self.signature_hash()]
-
     async def run(self):
-        if not hasattr(self.module_class, "entry_point"):
-            raise EmbeddedModuleFailure("No entry_point found!")
+
+        class FakeStdin:
+            buffer = None
+        # monkeypatching to pass the argument to the module, this is not
+        # really safe, and in the future, this will prevent us to run several
+        # modules in paralle. We can maybe use a scoped monkeypatch instead
+        _fake_stdin = FakeStdin() 
+        _fake_stdin.buffer = io.BytesIO(self.params.encode())
+        sys.stdin = _fake_stdin
+        # Trick to be sure ansible.module_utils.basic._load_params() won't
+        # try to build the module parameters from the daemon arguments
+        sys.argv = sys.argv[:1]
+        ansible.module_utils.basic._ANSIBLE_ARGS = None
+        if not hasattr(self.module_class, "main"):
+            raise EmbeddedModuleFailure("No main() found!")
         try:
-            if inspect.iscoroutinefunction(self.module_class.entry_point):
-                result = await self.module_class.entry_point(
-                    self, **self._initialized_env
-                )
+            if inspect.iscoroutinefunction(self.module_class.main):
+                await self.module_class.main()
             else:
-                result = self.module_class.entry_point(self, **self._initialized_env)
-        except EmbeddedModuleSuccess:
-            raise
+                self.module_class.main()
+        except EmbeddedModuleSuccess as e:
+            return e.kwargs
         except Exception as e:
             raise EmbeddedModuleFailure(e)
-        if not result:
-            result = {}
-        return result
-
-    def exit_json(self, **kwargs):
-        raise EmbeddedModuleSuccess(**kwargs)
 
 
 class AnsibleVMwareTurboMode:
@@ -170,28 +150,19 @@ class AnsibleVMwareTurboMode:
             return
         try:
             (
-                module_name,
-                collection_name,
                 ansiblez_path,
-                check_mode,
                 params,
             ) = json.loads(raw_data)
         except json.decoder.JSONDecodeError as e:
             return
 
         embedded_module = EmbeddedModule(
-            module_name, collection_name, ansiblez_path, check_mode, params
+            ansiblez_path, params
         )
 
         await embedded_module.load()
         try:
-            await embedded_module.initialize(self.sessions)
             result = await embedded_module.run()
-        except EmbeddedModuleSuccess as e:
-            result = e.kwargs
-        except EmbeddedModuleFailure as e:
-            # result = {"msg": e.get_message(), "failed": True}
-            result = {"msg": traceback.format_stack() + [str(e)], "failed": True}
         except Exception as e:
             result = {"msg": traceback.format_stack() + [str(e)], "failed": True}
 

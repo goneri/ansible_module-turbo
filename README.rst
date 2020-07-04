@@ -52,112 +52,21 @@ a little Python daemon. If a daemon already exists, it will just
 reuse it.
 All the module logic is run inside this Python daemon. This means:
 
-- Python modules are actually loaded once per playbook
+- Python modules are actually loaded one time
 - Ansible module can reuse an existing authenticated session.
 
 Example
 =======
 
 The Ansible module has to be slightly different. Here an example
-with OpenStack's `os_keypair` module that I've slightly simplified.
+with OpenStack and VMware.
 
-.. code-block:: python
+This examples use ``functools.lru_cache`` that is the Python core since 3.3.
+``lru_cache()`` decorator will managed the cache. It uses the function parameters
+as unicity criteria.
 
-
-    #!/usr/bin/python
-    (...)
-
-    DOCUMENTATION = '''(...)'''
-
-    from ansible_module.turbo.module import AnsibleTurboModule
-
-    from ansible_collections.openstack.cloud.plugins.module_utils.openstack import (openstack_full_argument_spec,
-                                                                                    openstack_module_kwargs)
-
-    def main():
-        argument_spec = openstack_full_argument_spec(
-            name=dict(required=True),
-            public_key=dict(default=None),
-            public_key_file=dict(default=None),
-            state=dict(default='present',
-                    choices=['absent', 'present', 'replace']),
-        )
-
-        module_kwargs = openstack_module_kwargs(
-            mutually_exclusive=[['public_key', 'public_key_file']])
-
-        module = AnsibleTurboModule(
-                "os_keypair",
-                "openstack.cloud",
-                argument_spec=argument_spec,
-                supports_check_mode=True,
-                **module_kwargs)
-        module.run()
-
-
-    def entry_point(module, sdk, cloud):
-        state = module.params['state']
-        name = module.params['name']
-        public_key = module.params['public_key']
-
-        if module.params['public_key_file']:
-            with open(module.params['public_key_file']) as public_key_fh:
-                public_key = public_key_fh.read().rstrip()
-
-
-        try:
-            keypair = cloud.get_keypair(name)
-
-            if module.check_mode:
-                module.exit_json(changed=_system_state_change(module, keypair))
-
-            if state in ('present', 'replace'):
-                if keypair and keypair['name'] == name:
-                    if public_key and (public_key != keypair['public_key']):
-                        if state == 'present':
-                            module.fail_json(
-                                msg="Key name %s present but key hash not the same"
-                                    " as offered. Delete key first." % name
-                            )
-                        else:
-                            cloud.delete_keypair(name)
-                            keypair = cloud.create_keypair(name, public_key)
-                            changed = True
-                    else:
-                        changed = False
-                else:
-                    keypair = cloud.create_keypair(name, public_key)
-                    changed = True
-
-                module.exit_json(changed=changed,
-                                 key=keypair,
-                                 id=keypair['id'])
-
-            elif state == 'absent':
-                if keypair:
-                    cloud.delete_keypair(name)
-                    module.exit_json(changed=True)
-                module.exit_json(changed=False)
-
-        except sdk.exceptions.OpenStackCloudException as e:
-            module.fail_json(msg=str(e))
-
-
-    if __name__ == '__main__':
-        main()
-
-In this example, the two main differences are:
-
-- the ``initialize()`` function: it will be run only once to
-  initialize the client. It returns a dictionary.
-- the ``entry_point()`` function: this the module logic. The
-  daemon will pass ``initialize()`` result through a ``**kwargs``
-  set of parameters.
-
-You can also use Github to `compare the two versions`_ of the
-Ansible module.
-
-.. _compare the two versions: https://github.com/goneri/ansible-collections-openstack/compare/turbo_mode_3_pre...goneri:turbo_mode_3?expand=1#diff-69ce5d194bb2d85237491c41946b2805
+.. _Integration with OpenStack Collection: https://github.com/goneri/ansible-collections-openstack/commit/53ce9860bb84eeab49a46f7a30e3c9588d53e367
+.. _Integration with VMware Collection: https://github.com/goneri/vmware/commit/d1c02b93cbf899fde3a4665e6bcb4d7531f683a3
 
 Demo
 ====
