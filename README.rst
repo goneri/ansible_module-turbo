@@ -65,8 +65,8 @@ This examples use ``functools.lru_cache`` that is the Python core since 3.3.
 ``lru_cache()`` decorator will managed the cache. It uses the function parameters
 as unicity criteria.
 
-.. _Integration with OpenStack Collection: https://github.com/goneri/ansible-collections-openstack/commit/53ce9860bb84eeab49a46f7a30e3c9588d53e367
-.. _Integration with VMware Collection: https://github.com/goneri/vmware/commit/d1c02b93cbf899fde3a4665e6bcb4d7531f683a3
+- Integration with OpenStack Collection: https://github.com/goneri/ansible-collections-openstack/commit/53ce9860bb84eeab49a46f7a30e3c9588d53e367
+- Integration with VMware Collection: https://github.com/goneri/vmware/commit/d1c02b93cbf899fde3a4665e6bcb4d7531f683a3
 
 Demo
 ====
