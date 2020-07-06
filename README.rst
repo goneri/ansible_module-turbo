@@ -38,7 +38,7 @@ For instance, here:
 - ``client = openstack.connect()```: 0.065s
 - ``client.authorize()```: 1.360s, I run my test against VexxHost public cloud.
 
-In this case, I've got a 2s-ish overhead per task. If my playbook
+In this case, it's a 2s-ish overhead per task. If the playbook
 comes with 10 tasks, the execution time cannot go below 20s.
 
 How Ansible Turbo Module improve the situation
