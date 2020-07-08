@@ -10,6 +10,7 @@ import signal
 import sys
 import traceback
 import zipfile
+from zipimport import zipimporter
 
 
 from ansible_module.turbo.exceptions import EmbeddedModuleFailure
@@ -86,23 +87,25 @@ class EmbeddedModule:
                 collection = ".".join(splitted[1:3])
                 name = splitted[-1][:-3]
                 return collection, name
+        raise Exception("Cannot find module name")
 
     async def load(self):
         async with sys_path_lock:
             sys.path.insert(0, self.ansiblez_path)
+            for path, module in tuple(sys.modules.items()):
+                if path and module and path.startswith("ansible_collections"):
+                    my_loader = zipimporter(self.ansiblez_path + os.sep + sys.modules[path].__loader__.prefix)
+                    sys.meta_path.append(my_loader)
+                    if hasattr(sys.modules[path], "__path__"):
+                        sys.modules[path].__path__ = self.ansiblez_path + os.sep + sys.modules[path].__loader__.prefix
             self.module_class = importlib.import_module(self.module_path)
 
     async def unload(self):
         async with sys_path_lock:
             sys.path = [i for i in sys.path if i != self.ansiblez_path]
-            for path, module in tuple(sys.modules.items()):
-                if path and module and path.startswith("ansible_collections"):
-                    splitted = path.split('.')
-                    # NOTE: Do we really need to remove the module?
-                    if len(splitted) == 6 and splitted[-2] == "plugins":
-                        del sys.modules[path]
-            importlib.invalidate_caches()
-            sys.path_importer_cache.clear()
+            sys.meta_path = [i for i in sys.meta_path if not (isinstance(i, zipimporter) and i.archive == self.ansiblez_path)]
+            # importlib.invalidate_caches()
+            # sys.path_importer_cache.clear()
 
     async def run(self):
 
