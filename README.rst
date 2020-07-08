@@ -55,6 +55,22 @@ All the module logic is run inside this Python daemon. This means:
 - Python modules are actually loaded one time
 - Ansible module can reuse an existing authenticated session.
 
+I'm a collection maintainer, How can I enable ```AnsibleTurboModule``?
+======================================================================
+
+Your module should inherite from ``AnsibleTurboModule``, instead of ``AnsibleModule``.
+
+.. code-block:: python
+
+  from ansible_module.turbo.module import AnsibleTurboModule as AnsibleModule
+
+You can also use the ``functools.lru_cache()`` decorator to ask Python to cache
+the result of an operation, like a network session creation.
+
+Finally, if some of the libraries you depend on are large, it may be nice
+to defer your module imports, and do the loading AFTER the
+``AnsibleTurboModule`` instance creation.
+
 Example
 =======
 
