@@ -59,10 +59,14 @@ class AnsibleTurboModule(ansible.module_utils.basic.AnsibleModule):
             ansible.module_utils.basic._ANSIBLE_ARGS.decode(),
         ]
         self._socket.send(json.dumps(data).encode())
-        b = self._socket.recv((1024 * 10))
-        raw = b.decode()
+        raw_answer = b""
+        while True:
+            b = self._socket.recv((1024 * 10))
+            if not b:
+                break
+            raw_answer += b
         self._socket.close()
-        result = json.loads(raw)
+        result = json.loads(raw_answer.decode())
         self.exit_json(**result)
 
     def exit_json(self, **kwargs):
