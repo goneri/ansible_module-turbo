@@ -69,20 +69,19 @@ class EmbeddedModule:
             collection_name=self.collection_name, module_name=self.module_name
         )
 
-
     def find_module_name(self):
         with zipfile.ZipFile(self.ansiblez_path) as zip:
             for path in zip.namelist():
-                if not path.startswith('ansible_collections'):
+                if not path.startswith("ansible_collections"):
                     continue
-                if not path.endswith('.py'):
+                if not path.endswith(".py"):
                     continue
-                if path.endswith('__init__.py'):
+                if path.endswith("__init__.py"):
                     continue
-                splitted = path.split('/')
+                splitted = path.split("/")
                 if len(splitted) != 6:
                     continue
-                if splitted[-3:-1] != ['plugins', 'modules']:
+                if splitted[-3:-1] != ["plugins", "modules"]:
                     continue
                 collection = ".".join(splitted[1:3])
                 name = splitted[-1][:-3]
@@ -94,27 +93,39 @@ class EmbeddedModule:
             sys.path.insert(0, self.ansiblez_path)
             for path, module in tuple(sys.modules.items()):
                 if path and module and path.startswith("ansible_collections"):
-                    my_loader = zipimporter(self.ansiblez_path + os.sep + sys.modules[path].__loader__.prefix)
+                    my_loader = zipimporter(
+                        self.ansiblez_path
+                        + os.sep
+                        + sys.modules[path].__loader__.prefix
+                    )
                     sys.meta_path.append(my_loader)
                     if hasattr(sys.modules[path], "__path__"):
-                        sys.modules[path].__path__ = self.ansiblez_path + os.sep + sys.modules[path].__loader__.prefix
+                        sys.modules[path].__path__ = (
+                            self.ansiblez_path
+                            + os.sep
+                            + sys.modules[path].__loader__.prefix
+                        )
             self.module_class = importlib.import_module(self.module_path)
 
     async def unload(self):
         async with sys_path_lock:
             sys.path = [i for i in sys.path if i != self.ansiblez_path]
-            sys.meta_path = [i for i in sys.meta_path if not (isinstance(i, zipimporter) and i.archive == self.ansiblez_path)]
+            sys.meta_path = [
+                i
+                for i in sys.meta_path
+                if not (isinstance(i, zipimporter) and i.archive == self.ansiblez_path)
+            ]
             # importlib.invalidate_caches()
             # sys.path_importer_cache.clear()
 
     async def run(self):
-
         class FakeStdin:
             buffer = None
+
         # monkeypatching to pass the argument to the module, this is not
         # really safe, and in the future, this will prevent us to run several
         # modules in paralle. We can maybe use a scoped monkeypatch instead
-        _fake_stdin = FakeStdin() 
+        _fake_stdin = FakeStdin()
         _fake_stdin.buffer = io.BytesIO(self.params.encode())
         sys.stdin = _fake_stdin
         # Trick to be sure ansible.module_utils.basic._load_params() won't
@@ -152,16 +163,11 @@ class AnsibleVMwareTurboMode:
         if not raw_data:
             return
         try:
-            (
-                ansiblez_path,
-                params,
-            ) = json.loads(raw_data)
+            (ansiblez_path, params,) = json.loads(raw_data)
         except json.decoder.JSONDecodeError as e:
             return
 
-        embedded_module = EmbeddedModule(
-            ansiblez_path, params
-        )
+        embedded_module = EmbeddedModule(ansiblez_path, params)
 
         await embedded_module.load()
         try:
